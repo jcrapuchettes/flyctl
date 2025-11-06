@@ -9,6 +9,7 @@ import (
 	fly "github.com/superfly/fly-go"
 	"github.com/superfly/fly-go/flaps"
 	"github.com/superfly/flyctl/flypg"
+	"github.com/superfly/flyctl/helpers"
 	"github.com/superfly/flyctl/internal/appconfig"
 	"github.com/superfly/flyctl/internal/appsecrets"
 	"github.com/superfly/flyctl/internal/flapsutil"
@@ -58,6 +59,7 @@ func newBackupRestore() *cobra.Command {
 		flag.App(),
 		flag.AppConfig(),
 		flag.Detach(),
+		flag.VMSizeFlags,
 		flag.String{
 			Name:        "restore-target-time",
 			Description: "RFC3339-formatted timestamp up to which recovery will proceed. Example: 2021-07-16T12:34:56Z",
@@ -159,6 +161,12 @@ func runBackupRestore(ctx context.Context) error {
 		imageRef = leader.FullImageRef()
 	}
 
+	// Clone the leader's guest configuration and apply any VM size flags that were specified
+	guest, err := flag.GetMachineGuest(ctx, helpers.Clone(leader.Config.Guest))
+	if err != nil {
+		return err
+	}
+
 	// Build the input for the new cluster using the leader's configuration.
 	input := &flypg.CreateClusterInput{
 		AppName:                   destAppName,
@@ -170,14 +178,12 @@ func runBackupRestore(ctx context.Context) error {
 		Autostart:                 *leader.Config.Services[0].Autostart,
 		BackupsEnabled:            false,
 		VolumeSize:                &leader.Config.Mounts[0].SizeGb,
-		Guest:                     leader.Config.Guest,
+		Guest:                     guest,
 		BarmanRemoteRestoreConfig: restoreSecret,
 	}
 
 	launcher := flypg.NewLauncher(client)
-	launcher.LaunchMachinesPostgres(ctx, input, false)
-
-	return nil
+	return launcher.LaunchMachinesPostgres(ctx, input, false)
 }
 
 func newBackupCreate() *cobra.Command {
